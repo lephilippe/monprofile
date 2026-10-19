@@ -339,6 +339,31 @@ def profile_file(a, name):
     return os.path.join(profile_dir(a.dir), name + ".json")
 
 
+def diff_summary(saved, now_list, check_hdr=True):
+    """Compare a saved summary with the current one. Returns a list of problems
+    (empty list = the current setup matches the saved one)."""
+    keys = ("width", "height", "x", "y", "rotation", "hz", "divider")
+    now = {(e["adapter"], e["target_id"]): e for e in now_list}
+    wanted = {(e["adapter"], e["target_id"]) for e in saved}
+    problems = []
+    for e in saved:
+        got = now.get((e["adapter"], e["target_id"]))
+        label = e["name"] or f"target {e['target_id']}"
+        if got is None:
+            problems.append(f"{label}: display is not active")
+            continue
+        diffs = [f"{k}: wanted {e[k]}, got {got[k]}" for k in keys if e[k] != got[k]]
+        if check_hdr and e.get("hdr_supported") and e["hdr"] != got["hdr"]:
+            diffs.append(f"HDR: wanted {e['hdr']}, got {got['hdr']}")
+        if diffs:
+            problems.append(f"{label}: " + "; ".join(diffs))
+    for k, got in now.items():
+        if k not in wanted:
+            problems.append(f"{got['name'] or 'target ' + str(got['target_id'])}: "
+                            "active but not part of the profile")
+    return problems
+
+
 def cmd_save(a):
     flags, paths, np_, modes, nm = query_active()
     adapters = {}
@@ -384,6 +409,14 @@ def cmd_load(a):
         sys.exit(f"No profile named '{a.name}'. Use 'list' to see saved profiles.")
     with open(fn, encoding="utf-8") as f:
         prof = json.load(f)
+
+    if not a.reload:
+        _, p0, np0, m0, nm0 = query_active()
+        if not diff_summary(prof["summary"], summarize(p0, np0, m0, nm0),
+                            not a.no_hdr):
+            print(f"Profile '{a.name}' is already active, nothing to do "
+                  "(use --reload to apply it anyway).")
+            return
 
     # LUIDs change between reboots, so remap saved adapters via their device path.
     cur = current_adapter_map()
@@ -439,22 +472,10 @@ def cmd_load(a):
     if a.no_verify:
         return
     _, p2, np2, m2, nm2 = query_active()
-    now = {(e["adapter"], e["target_id"]): e for e in summarize(p2, np2, m2, nm2)}
-    keys = ("width", "height", "x", "y", "rotation", "hz", "divider")
-    problems = 0
-    for e in prof["summary"]:
-        got = now.get((e["adapter"], e["target_id"]))
-        label = e["name"] or f"target {e['target_id']}"
-        if got is None:
-            print(f"  MISMATCH {label}: display is not active")
-            problems += 1
-            continue
-        diffs = [f"{k}: wanted {e[k]}, got {got[k]}" for k in keys if e[k] != got[k]]
-        if e.get("hdr_supported") and e["hdr"] != got["hdr"]:
-            diffs.append(f"HDR: wanted {e['hdr']}, got {got['hdr']}")
-        if diffs:
-            problems += 1
-            print(f"  MISMATCH {label}: " + "; ".join(diffs))
+    problems = diff_summary(prof["summary"], summarize(p2, np2, m2, nm2),
+                            not a.no_hdr)
+    for p in problems:
+        print(f"  MISMATCH {p}")
     print("Verified: current state matches the profile." if not problems
           else "Some settings differ from the saved profile (see above).")
 
@@ -469,7 +490,7 @@ def cmd_list(a):
             with open(os.path.join(d, n + ".json"), encoding="utf-8") as f:
                 p = json.load(f)
             print(f"{n}  ({len(p['summary'])} display(s), saved {p['saved']})")
-        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+        except Exception:
             print(f"{n}  (unreadable)")
 
 
@@ -506,6 +527,8 @@ def main():
     s = sub.add_parser("load")
     s.add_argument("name")
     s.add_argument("--no-hdr", action="store_true", help="don't restore HDR state")
+    s.add_argument("--reload", action="store_true",
+                   help="apply the profile even if it is already active")
     s.add_argument("--no-verify", action="store_true", help="skip the post-apply check")
     s.set_defaults(func=cmd_load)
     sub.add_parser("list").set_defaults(func=cmd_list)

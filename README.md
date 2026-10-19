@@ -23,11 +23,13 @@ python monprofile.py delete <name>   # delete profile
 
 Profiles are stored as JSON in `%APPDATA%\monprofile`. Use `--dir <folder>` to put them somewhere else.
 
-`load` re-reads the display state afterwards and tells you if anything doesn't match the profile. Skip that with `--no-verify`, or leave HDR alone with `--no-hdr`.
+`load` first checks whether the profile is already active and does nothing if it is, so mashing a hotkey won't make your screens flicker. Use `--reload` to apply it anyway.
+
+After applying, it re-reads the display state and tells you if anything doesn't match the profile. Skip that with `--no-verify`, or leave HDR alone (both when applying and when comparing) with `--no-hdr`.
 
 A typical flow: set your monitors up the way you want in Windows settings, run `save desk`, change things for something else, run `save tv`, and from then on just `load desk` or `load tv`.
 
-## (Optional) Hotkeys with AutoHotkey v2
+### (Optional) Hotkeys with AutoHotkey v2
 
 ```autohotkey
 #Requires AutoHotkey v2.0
